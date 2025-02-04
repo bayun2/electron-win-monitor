@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Process Monitor</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+      color: #333;
+      font-size: 12px;
+    }
+
+    .table-container {
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin-top: 0;
+      margin-bottom: 15px;
+      color: #2c3e50;
+      font-size: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+
+    thead th {
+      background-color: #f8f9fa;
+      padding: 8px;
+      font-weight: 600;
+      text-align: left;
+      border-bottom: 2px solid #dee2e6;
+      color: #495057;
+      font-size: 12px;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #dee2e6;
+      transition: background-color 0.2s;
+    }
+
+    tbody tr:hover {
+      background-color: #f8f9fa;
+    }
+
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #dee2e6;
+    }
+
+    .numeric {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      text-align: right;
+    }
+
+    .process-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toggle {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      color: #6c757d;
+      transition: color 0.2s;
+      font-size: 10px;
+      padding: 0;
+      margin: 0;
+    }
+
+    .toggle:hover {
+      color: #0056b3;
+    }
+
+    .indent {
+      margin-left: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="table-container">
+    <h2>Electron 进程监视器</h2>
+    <table id="processTable">
+      <thead>
+        <tr>
+          <th>PID</th>
+          <th>Name</th>
+          <th>CPU</th>
+          <th>Memory</th>
+          <th>Type</th>
+          <th>Started</th>
+          <th>Status</th>
+          <th>PPID</th>
+          <th>WinID</th>
+          <th>WebContentsID</th>
+          <th>DevTools</th>
+        </tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let processData = [];  // 改为让数据可以被更新
+
+    // 添加一个 Map 来存储进程展开状态
+    const processExpandStates = new Map();
+
+    function buildProcessTree(data) {
+      const processMap = new Map();
+      const result = [];
+
+      data.forEach(process => {
+        processMap.set(process.pid, { ...process, children: [] });
+      });
+
+      processMap.forEach(process => {
+        if (process.parentPid === null) {
+          result.push(process);
+        } else {
+          const parent = processMap.get(process.parentPid);
+          if (parent) {
+            parent.children.push(process);
+          }
+        }
+      });
+
+      function flattenTree(node, result = []) {
+        result.push(node);
+        node.children.forEach(child => flattenTree(child, result));
+        return result;
+      }
+
+      const flattenedData = [];
+      result.forEach(root => {
+        flattenTree(root, flattenedData);
+      });
+
+      return flattenedData;
+    }
+
+    function populateTable(data) {
+      const tbody = document.querySelector('tbody');
+      tbody.innerHTML = renderProcessTree(data);
+    }
+
+    function toggleChildRows(parentPid, arrow) {
+      const allRows = document.querySelectorAll('tr[data-parent]');
+      const isHidden = arrow.textContent.includes("▶");
+      arrow.textContent = isHidden ? "▼ " : "▶ ";
+
+      function toggleChildren(pid, hide) {
+        allRows.forEach(row => {
+          if (row.getAttribute('data-parent') === pid.toString()) {
+            row.classList.toggle('hidden', hide);
+            const currentArrow = row.querySelector('.arrow');
+            if (currentArrow && currentArrow.textContent.trim()) {
+              currentArrow.textContent = hide ? "▶ " : "▼ ";
+            }
+            toggleChildren(row.getAttribute('data-pid'), hide);
+          }
+        });
+      }
+
+      toggleChildren(parentPid, !isHidden);
+    }
+
+    // 添加更新数据的函数
+    function updateProcessData(newData) {
+        // 在更新数据时保持展开状态
+        newData.forEach(process => {
+            if (processExpandStates.has(process.pid)) {
+                process.expanded = processExpandStates.get(process.pid);
+            }
+        });
+        processData = newData;
+        populateTable(processData);
+    }
+
+    // 保留一个 electron.receive 处理器，使用 updateProcessData
+    window.electron.receive('update-process-data', (data) => {
+        updateProcessData(data);
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+        populateTable(processData);
+    });
+
+    function renderProcessRow(process, level = 0) {
+      const indent = '&nbsp;'.repeat(level * 4);
+      const hasChildren = process.children && process.children.length > 0;
+      const toggle = hasChildren ? 
+        `<span class="toggle" onclick="toggleProcess(${process.pid})">${process.expanded ? '▼' : '▶'}</span>` : 
+        '<span class="toggle"></span>';
+
+      const devToolsButton = process.type === 'Tab' ? 
+        `<button onclick="openDevTools(${process.webContentsId})" style="cursor: pointer; padding: 2px 6px; font-size: 11px;">DevTools</button>` : 
+        '';
+
+      return `
+        <tr data-pid="${process.pid}" data-level="${level}">
+          <td class="numeric">
+            <div class="process-name">
+              ${indent}${toggle}${process.pid}
+            </div>
+          </td>
+          <td>${process.name}</td>
+          <td class="numeric">${process.cpu}</td>
+          <td class="numeric">${process.memory}</td>
+          <td>${process.type}</td>
+          <td>${process.started}</td>
+          <td>${process.state}</td>
+          <td class="numeric">${process.parentPid || '-'}</td>
+          <td class="numeric">${process.winId}</td>
+          <td class="numeric">${process.webContentsId}</td>
+          <td>${devToolsButton}</td>
+        </tr>
+      `;
+    }
+
+    function renderProcessTree(processes, level = 0) {
+      let html = '';
+      for (const process of processes) {
+        html += renderProcessRow(process, level);
+        if (process.expanded && process.children && process.children.length > 0) {
+          html += renderProcessTree(process.children, level + 1);
+        }
+      }
+      return html;
+    }
+
+    function toggleProcess(pid) {
+        const process = processData.find(p => p.pid === pid);
+        if (process) {
+            process.expanded = !process.expanded;
+            // 保存展开状态
+            processExpandStates.set(pid, process.expanded);
+            populateTable(processData);
+        }
+    }
+
+    // 添加 openDevTools 函数
+    function openDevTools(webContentsId) {
+        if (webContentsId && webContentsId !== -1) {
+            window.electron.send('open-devtools', webContentsId);
+        }
+    }
+  </script>
+</body>
+</html>
