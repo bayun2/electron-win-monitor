@@ -1,18 +1,19 @@
 {
   "name": "electron-process-monitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Process monitor plugin for Electron applications",
   "main": "src/index.js",
   "scripts": {
     "dev:demo": "electron demo/main.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "homepage": "https://github.com/bayun2/electron-win-monitor#readme",
   "keywords": [
     "electron",
     "process",
     "monitor"
   ],
-  "author": "Your Name",
+  "author": "bayun2",
   "license": "MIT",
   "peerDependencies": {
     "electron": ">=33.3.0"
